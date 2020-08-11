@@ -1,5 +1,6 @@
 #include <fstream>
 #include <iostream>
+#include <random>
 #include <regex>
 
 #include <boost/asio.hpp>
@@ -11,6 +12,10 @@
 #include <discordpp/plugin-responder.hh>
 #include <discordpp/rest-beast.hh>
 #include <discordpp/websocket-beast.hh>
+
+#define GUILD "164234463247597568"
+#define CHANNEL "742540278484959322"
+#define ROLE "742540350392107152"
 
 namespace asio = boost::asio;
 using json = nlohmann::json;
@@ -25,12 +30,15 @@ std::istream &safeGetline(std::istream &is, std::string &t);
 
 void filter(std::string &target, const std::string &pattern);
 
+void greet(std::shared_ptr<DppBot> &bot, std::string &questionID, int &answer,
+           const json &user);
+
 int main() {
     dpp::log::filter = dpp::log::info;
     dpp::log::out = &std::cerr;
 
     std::cout
-        << "Howdy, and thanks for trying out Discord++!\n"
+        << "Howdy, and thanks for trying out Discord++ Gatekeeper!\n"
         << "Feel free to drop into the official server at "
            "https://discord.gg/0usP6xmT4sQ4kIDh if you have any questions.\n\n"
         << std::flush;
@@ -39,15 +47,16 @@ int main() {
 
     std::string token = getToken();
     if (token.empty()) {
-        std::cerr << "CRITICAL: "
-                  << "There is no valid way for Echo to obtain a token! Use "
-                     "one of the following ways:"
-                  << std::endl
-                  << "(1) Fill the BOT_TOKEN environment variable with the "
-                     "token (e.g. 'Bot 123456abcdef')."
-                  << std::endl
-                  << "(2) Copy the example `token.eg.dat` as `token.dat` and "
-                     "write your own token to it.\n";
+        std::cerr
+            << "CRITICAL: "
+            << "There is no valid way for Gatekeeper to obtain a token! Use "
+               "one of the following ways:"
+            << std::endl
+            << "(1) Fill the BOT_TOKEN environment variable with the "
+               "token (e.g. 'Bot 123456abcdef')."
+            << std::endl
+            << "(2) Copy the example `token.eg.dat` as `token.dat` and "
+               "write your own token to it.\n";
         exit(1);
     }
 
@@ -56,73 +65,64 @@ int main() {
     // Don't complain about unhandled events
     bot->debugUnhandled = false;
 
-    /*/
-     * Create handler for the READY payload, this may be handled by the bot in
-    the future.
-     * The `self` object contains all information about the 'bot' user.
-    /*/
     json self;
     bot->handlers.insert(
         {"READY", [&self](json data) { self = data["user"]; }});
 
-    bot->prefix = "~";
+    bot->prefix = "!";
 
-    bot->respond("help", "Mention me and I'll echo your message back!");
+    bot->respond("help", "`help`: Print this message.\n"
+                         "`join`: Re-send the join prompt");
 
-    bot->respond("about", [&bot](json msg) {
-        std::ostringstream content;
-        content
-            << "Sure thing, "
-            << (msg["member"]["nick"].is_null()
-                    ? msg["author"]["username"].get<std::string>()
-                    : msg["member"]["nick"].get<std::string>())
-            << "!\n"
-            << "I'm a simple bot meant to demonstrate the Discord++ library.\n"
-            << "You can learn more about Discord++ at "
-               "https://discord.gg/0usP6xmT4sQ4kIDh";
-        bot->call("POST",
-                  "/channels/" + msg["channel_id"].get<std::string>() +
-                      "/messages",
-                  json({{"content", content.str()}}));
+    std::string questionID;
+    int answer;
+
+    bot->handlers.insert(
+        {"GUILD_MEMBER_ADD", [&bot, &questionID, &answer](const json &msg) {
+             if (msg["guild_id"].get<std::string>() != GUILD)
+                 return;
+             bot->call(
+                 "PUT",
+                 "/guilds/" GUILD "/members/" +
+                     msg["user"]["id"].get<std::string>() + "/roles/" ROLE,
+                 [&bot, &questionID, &answer, msg](bool fail, const json &) {
+                     greet(bot, questionID, answer, msg["user"]);
+                 });
+         }});
+
+    bot->respond("join", [&bot, &questionID, &answer](const json &msg) {
+        if (msg["guild_id"].get<std::string>() != GUILD ||
+            msg["channel_id"].get<std::string>() != CHANNEL)
+            return;
+        greet(bot, questionID, answer, msg["author"]);
     });
 
-    // Create handler for the MESSAGE_CREATE payload, this receives all messages
-    // sent that the bot can see.
     bot->handlers.insert(
-        {"MESSAGE_CREATE", [&bot, &self](json msg) {
-             // Scan through mentions in the message for self
-             bool mentioned = false;
-             for (const json &mention : msg["mentions"]) {
-                 mentioned = mentioned or mention["id"] == self["id"];
+        {"MESSAGE_REACTION_ADD",
+         [&bot, &self, &questionID, &answer](const json &msg) {
+             if (msg["guild_id"].get<std::string>() != GUILD ||
+                 msg["channel_id"].get<std::string>() != CHANNEL ||
+                 msg["message_id"].get<std::string>() != questionID ||
+                 msg["member"]["user"]["id"].get<std::string>() ==
+                     self["id"].get<std::string>())
+                 return;
+
+             bool isNew = false;
+             for (const auto &role : msg["member"]["roles"]) {
+                 isNew = isNew || role.get<std::string>() == ROLE;
              }
-             if (mentioned) {
-                 // Identify and remove mentions of self from the message
-                 std::string content = std::regex_replace(
-                     msg["content"].get<std::string>(),
-                     std::regex(R"(<@!?)" + self["id"].get<std::string>() +
-                                R"(> ?)"),
-                     "");
+             if (!isNew)
+                 return;
 
-                 // Get the target user's display name
-                 std::string name =
-                     (msg["member"]["nick"].is_null()
-                          ? msg["author"]["username"].get<std::string>()
-                          : msg["member"]["nick"].get<std::string>());
+             std::string strAnswer = "🇦";
+             strAnswer[3] += answer;
 
-                 std::cout << "Echoing " << name << '\n';
-
-                 // Echo the created message
-                 bot->call("POST",
-                           "/channels/" + msg["channel_id"].get<std::string>() +
-                               "/messages",
-                           json({{"content", content}}));
-
-                 // Set status to Playing "with [author]"
-                 bot->send(3,
-                           {{"game", {{"name", "with " + name}, {"type", 0}}},
-                            {"status", "online"},
-                            {"afk", false},
-                            {"since", "null"}});
+             if (msg["emoji"]["name"].get<std::string>() == strAnswer) {
+                 bot->call("DELETE",
+                           "/guilds/" GUILD "/members/" +
+                               msg["member"]["user"]["id"].get<std::string>() +
+                               "/roles/" ROLE);
+                 bot->call("DELETE", "/channels/" CHANNEL "/messages/" + questionID);
              }
          }});
 
@@ -136,6 +136,74 @@ int main() {
     bot->run();
 
     return 0;
+}
+
+void greet(std::shared_ptr<DppBot> &bot, std::string &questionID, int &answer,
+           const json &user) {
+    if (!questionID.empty()) {
+        bot->call("DELETE", "/channels/" CHANNEL "/messages/" + questionID);
+    }
+
+    std::ostringstream content;
+    content << "Howdy, <@" << user["id"].get<std::string>()
+            << ">! To join the server, please answer the following question "
+               "by reacting:\n**What is Discord++?**\n";
+
+    static const std::string correct = "A C++ library";
+    static const std::vector<std::string> incorrect{
+        "A hacked app", "A way to get free Nitro",
+        "A hacking/griefing toolset"};
+    static auto rng = std::mt19937(std::random_device()());
+    static std::uniform_int_distribution<int> distribution(0, incorrect.size());
+
+    std::vector<std::string> choices(incorrect);
+    std::shuffle(choices.begin(), choices.end(), rng);
+    answer = distribution(rng);
+
+    choices.insert(choices.begin() + answer, correct);
+
+    for (int i = 0; i < choices.size(); i++) {
+        content << ":regional_indicator_" << (char)('a' + i) << ": "
+                << choices[i] << '\n';
+    }
+
+    bot->call(
+        "POST", "/channels/" CHANNEL "/messages", {{"content", content.str()}},
+        [&bot, &questionID](bool fail, const json &res) {
+            if (fail)
+                return;
+            questionID = res["id"].get<std::string>();
+            bot->call(
+                "PUT",
+                "/channels/" CHANNEL "/messages/" + questionID +
+                    "/reactions/%F0%9F%87%A6/@me",
+                [&bot, &questionID](bool fail, const json &) {
+                    if (fail)
+                        return;
+                    bot->call(
+                        "PUT",
+                        "/channels/" CHANNEL "/messages/" + questionID +
+                            "/reactions/%F0%9F%87%A7/@me",
+                        [&bot, &questionID](bool fail, const json &) {
+                            if (fail)
+                                return;
+                            bot->call(
+                                "PUT",
+                                "/channels/" CHANNEL "/messages/" + questionID +
+                                    "/reactions/%F0%9F%87%A8/@me",
+                                [&bot, &questionID](bool fail, const json &) {
+                                    if (fail)
+                                        return;
+                                    bot->call(
+                                        "PUT",
+                                        "/channels/" CHANNEL "/"
+                                        "messages/" +
+                                            questionID +
+                                            "/reactions/%F0%9F%87%A9/@me");
+                                });
+                        });
+                });
+        });
 }
 
 std::string getToken() {
