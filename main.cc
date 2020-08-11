@@ -16,6 +16,7 @@
 #define GUILD "164234463247597568"
 #define CHANNEL "742540278484959322"
 #define ROLE "742540350392107152"
+#define GOODROLE "742606708383154177"
 
 namespace asio = boost::asio;
 using json = nlohmann::json;
@@ -123,6 +124,10 @@ int main() {
                                msg["member"]["user"]["id"].get<std::string>() +
                                "/roles/" ROLE);
                  bot->call("DELETE", "/channels/" CHANNEL "/messages/" + questionID);
+                 bot->call(
+                     "PUT",
+                     "/guilds/" GUILD "/members/" +
+                     msg["user"]["id"].get<std::string>() + "/roles/" GOODROLE);
              }
          }});
 
