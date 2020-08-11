@@ -127,7 +127,7 @@ int main() {
                  bot->call(
                      "PUT",
                      "/guilds/" GUILD "/members/" +
-                     msg["user"]["id"].get<std::string>() + "/roles/" GOODROLE);
+                     msg["member"]["user"]["id"].get<std::string>() + "/roles/" GOODROLE);
              }
          }});
 
