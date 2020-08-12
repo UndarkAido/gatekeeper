@@ -53,5 +53,5 @@ jobs:
       
     - uses: actions/upload-artifact@v1
       with:
-        name: echo_bot
+        name: gatekeeper
         path: ${{runner.workspace}}/build/gatekeeper
