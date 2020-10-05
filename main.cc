@@ -108,6 +108,8 @@ int main() {
         printAndTell(bot, msg["author"]["username"].get<std::string>() +
                               " requested a quiz.");
         greet(bot, questionID, answer, msg["author"]);
+
+        bot->call("DELETE", "/channels/" QUIZCHANNEL "/messages/" + msg["id"].get<std::string>());
     });
 
     bot->handlers.insert(
@@ -295,5 +297,5 @@ std::istream &safeGetline(std::istream &is, std::string &t) {
 void printAndTell(std::shared_ptr<DppBot> bot, std::string message) {
     std::cout << message << '\n';
     bot->call("POST", "/channels/" LOGCHANNEL "/messages",
-             {{"content", message}});
+              {{"content", message}});
 }
