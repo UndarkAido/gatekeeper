@@ -14,9 +14,11 @@
 #include <discordpp/websocket-simpleweb.hh>
 
 #define GUILD "164234463247597568"
-#define CHANNEL "742540278484959322"
-#define ROLE "742540350392107152"
-#define GOODROLE "742606708383154177"
+#define QUIZCHANNEL "742540278484959322"
+#define KEYROLE "742606708383154177"
+#define LOCKROLE "761803600199680001"
+#define GREETCHANNEL "164234463247597568"
+#define LOGCHANNEL "475052413775249408"
 
 namespace asio = boost::asio;
 using json = nlohmann::json;
@@ -31,8 +33,10 @@ std::istream &safeGetline(std::istream &is, std::string &t);
 
 void filter(std::string &target, const std::string &pattern);
 
-void greet(std::shared_ptr<DppBot> &bot, std::string &questionID, int &answer,
+void greet(std::shared_ptr<DppBot> bot, std::string &questionID, int &answer,
            const json &user);
+
+void printAndTell(std::shared_ptr<DppBot> bot, std::string message);
 
 int main() {
     dpp::log::filter = dpp::log::info;
@@ -63,8 +67,12 @@ int main() {
 
     // Create Bot object
     auto bot = std::make_shared<DppBot>();
+
     // Don't complain about unhandled events
     bot->debugUnhandled = false;
+
+    // Don't show heartbeat status
+    bot->showHeartbeats = false;
 
     json self;
     bot->handlers.insert(
@@ -82,53 +90,60 @@ int main() {
         {"GUILD_MEMBER_ADD", [&bot, &questionID, &answer](const json &msg) {
              if (msg["guild_id"].get<std::string>() != GUILD)
                  return;
-             bot->call(
+             std::cout << msg["user"]["username"] << " joined.\n";
+             greet(bot, questionID, answer, msg["user"]);
+             /*bot->call(
                  "PUT",
                  "/guilds/" GUILD "/members/" +
                      msg["user"]["id"].get<std::string>() + "/roles/" ROLE,
                  [&bot, &questionID, &answer, msg](bool fail, const json &) {
                      greet(bot, questionID, answer, msg["user"]);
-                 });
+                 });*/
          }});
 
     bot->respond("join", [&bot, &questionID, &answer](const json &msg) {
         if (msg["guild_id"].get<std::string>() != GUILD ||
-            msg["channel_id"].get<std::string>() != CHANNEL)
+            msg["channel_id"].get<std::string>() != QUIZCHANNEL)
             return;
+        printAndTell(bot, msg["author"]["username"].get<std::string>() +
+                              " requested a quiz.");
         greet(bot, questionID, answer, msg["author"]);
     });
 
     bot->handlers.insert(
         {"MESSAGE_REACTION_ADD",
-         [&bot, &self, &questionID, &answer](const json &msg) {
+         [bot, &self, &questionID, &answer](const json &msg) {
              if (msg["guild_id"].get<std::string>() != GUILD ||
-                 msg["channel_id"].get<std::string>() != CHANNEL ||
+                 msg["channel_id"].get<std::string>() != QUIZCHANNEL ||
                  msg["message_id"].get<std::string>() != questionID ||
                  msg["member"]["user"]["id"].get<std::string>() ==
                      self["id"].get<std::string>())
                  return;
 
-             bool isNew = false;
+             bool isKeyed = false;
              for (const auto &role : msg["member"]["roles"]) {
-                 isNew = isNew || role.get<std::string>() == ROLE;
+                 isKeyed = isKeyed || role.get<std::string>() == KEYROLE;
              }
-             if (!isNew)
+             if (isKeyed)
                  return;
 
              std::string strAnswer = "🇦";
              strAnswer[3] += answer;
 
-             if (msg["emoji"]["name"].get<std::string>() == strAnswer) {
-                 bot->call("DELETE",
-                           "/guilds/" GUILD "/members/" +
-                               msg["member"]["user"]["id"].get<std::string>() +
-                               "/roles/" ROLE);
-                 bot->call("DELETE", "/channels/" CHANNEL "/messages/" + questionID);
-                 bot->call(
-                     "PUT",
-                     "/guilds/" GUILD "/members/" +
-                     msg["member"]["user"]["id"].get<std::string>() + "/roles/" GOODROLE);
-             }
+             bool passed = msg["emoji"]["name"].get<std::string>() == strAnswer;
+
+             printAndTell(bot,
+                          msg["member"]["user"]["username"].get<std::string>() +
+                              " " + (passed ? "passed" : "failed") +
+                              " the quiz.\n");
+
+             bot->call("DELETE",
+                       "/channels/" QUIZCHANNEL "/messages/" + questionID);
+
+             bot->call("PUT",
+                       "/guilds/" GUILD "/members/" +
+                           msg["member"]["user"]["id"].get<std::string>() +
+                           "/roles/" + (passed ? KEYROLE : LOCKROLE));
          }});
 
     // Create Asio context, this handles async stuff.
@@ -143,10 +158,10 @@ int main() {
     return 0;
 }
 
-void greet(std::shared_ptr<DppBot> &bot, std::string &questionID, int &answer,
+void greet(std::shared_ptr<DppBot> bot, std::string &questionID, int &answer,
            const json &user) {
     if (!questionID.empty()) {
-        bot->call("DELETE", "/channels/" CHANNEL "/messages/" + questionID);
+        bot->call("DELETE", "/channels/" QUIZCHANNEL "/messages/" + questionID);
     }
 
     std::ostringstream content;
@@ -173,35 +188,36 @@ void greet(std::shared_ptr<DppBot> &bot, std::string &questionID, int &answer,
     }
 
     bot->call(
-        "POST", "/channels/" CHANNEL "/messages", {{"content", content.str()}},
-        [&bot, &questionID](bool fail, const json &res) {
+        "POST", "/channels/" QUIZCHANNEL "/messages",
+        {{"content", content.str()}},
+        [bot, &questionID](bool fail, const json &res) {
             if (fail)
                 return;
             questionID = res["id"].get<std::string>();
             bot->call(
                 "PUT",
-                "/channels/" CHANNEL "/messages/" + questionID +
+                "/channels/" QUIZCHANNEL "/messages/" + questionID +
                     "/reactions/%F0%9F%87%A6/@me",
-                [&bot, &questionID](bool fail, const json &) {
+                [bot, &questionID](bool fail, const json &) {
                     if (fail)
                         return;
                     bot->call(
                         "PUT",
-                        "/channels/" CHANNEL "/messages/" + questionID +
+                        "/channels/" QUIZCHANNEL "/messages/" + questionID +
                             "/reactions/%F0%9F%87%A7/@me",
-                        [&bot, &questionID](bool fail, const json &) {
+                        [bot, &questionID](bool fail, const json &) {
                             if (fail)
                                 return;
                             bot->call(
                                 "PUT",
-                                "/channels/" CHANNEL "/messages/" + questionID +
-                                    "/reactions/%F0%9F%87%A8/@me",
-                                [&bot, &questionID](bool fail, const json &) {
+                                "/channels/" QUIZCHANNEL "/messages/" +
+                                    questionID + "/reactions/%F0%9F%87%A8/@me",
+                                [bot, &questionID](bool fail, const json &) {
                                     if (fail)
                                         return;
                                     bot->call(
                                         "PUT",
-                                        "/channels/" CHANNEL "/"
+                                        "/channels/" QUIZCHANNEL "/"
                                         "messages/" +
                                             questionID +
                                             "/reactions/%F0%9F%87%A9/@me");
@@ -274,4 +290,10 @@ std::istream &safeGetline(std::istream &is, std::string &t) {
             t += (char)c;
         }
     }
+}
+
+void printAndTell(std::shared_ptr<DppBot> bot, std::string message) {
+    std::cout << message << '\n';
+    bot->call("POST", "/channels/" LOGCHANNEL "/messages",
+             {{"content", message}});
 }
