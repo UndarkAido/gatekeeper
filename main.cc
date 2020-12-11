@@ -74,6 +74,8 @@ int main() {
     // Don't show heartbeat status
     bot->showHeartbeats = false;
 
+    bot->intents = discordpp::intents::GUILD_MEMBERS | discordpp::intents::GUILD_MESSAGES | discordpp::intents::GUILD_MESSAGE_REACTIONS;
+    
     json self;
     bot->handlers.insert(
         {"READY", [&self](json data) { self = data["user"]; }});
