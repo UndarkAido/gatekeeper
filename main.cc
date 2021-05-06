@@ -197,7 +197,7 @@ void greet(std::shared_ptr<DppBot> bot, std::string &questionID, int &answer,
         [bot, &questionID](bool fail, const json &res) {
             if (fail)
                 return;
-            questionID = res["id"].get<std::string>();
+            questionID = res["body"]["id"].get<std::string>();
             bot->call(
                 "PUT",
                 "/channels/" QUIZCHANNEL "/messages/" + questionID +
